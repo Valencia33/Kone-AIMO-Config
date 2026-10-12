@@ -73,7 +73,7 @@ class MainForm : Form
     public MainForm(bool trayStart = false)
     {
         this.trayStart = trayStart; allowShow = !trayStart;
-        Text = "Kone AIMO"; Font = Theme.Body; BackColor = Theme.Window; ForeColor = Theme.Text;
+        Text = Program.Title; Font = Theme.Body; BackColor = Theme.Window; ForeColor = Theme.Text;
         ClientSize = new Size(1040, 780); MinimumSize = new Size(960, 640); StartPosition = FormStartPosition.CenterScreen;
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
@@ -265,7 +265,7 @@ class MainForm : Form
     Control MacrosPage()
     {
         var col = Column();
-        col.Controls.Add(new Group("Before you start")
+        col.Controls.Add(new Group("Before you start", "I built this app for my own animation work, which is why it has this page. Everything else works without Blender.")
             .Add("Assign", null, "Pick a macro from any button's menu on the Buttons page, then Save to Mouse.")
             .Add("Cursor", null, "Blender sends keys to the editor under the cursor. Keep it over the 3D Viewport for poses and views.")
             .Add("Keymap", null, "Uses Blender's default keymap. Play needs Spacebar Action set to Play, and the numpad views need Num Lock on."));
@@ -298,7 +298,7 @@ class MainForm : Form
 
         var saveB = new Btn("Save"); var restoreB = new Btn("Restore");
         saveB.Click += (s, e) => SaveBackup(); restoreB.Click += (s, e) => RestoreBackup();
-        var backup = new Group("Backup", "Your original settings are in backup_original_2026-10-12.json next to this app.")
+        var backup = new Group("Backup", $"What your mouse held the first time this app connected is kept in {AppConfig.OriginalBackup}.")
             .Add("Save a backup", saveB, "All 5 profiles, to a file.")
             .Add("Restore a backup", restoreB, "Writes all 5 profiles from a file to the mouse.");
 
@@ -322,11 +322,11 @@ class MainForm : Form
         test.Click += (s, e) => { using (var f = new UnplugTestForm()) f.ShowDialog(this); Connect(); };
         var storage = new Group("Storage").Add("Unplug test", test, "Changes one value in a profile you aren't using, then checks it survives unplugging the mouse.");
 
-        var about = new Group("About", "Built with help from Claude.")
+        var about = new Group("About", "Unofficial. Not made, endorsed or supported by Turtle Beach or ROCCAT. Provided as is, with no warranty. Built with help from Claude.")
             .Add("Macro keys in use", macroCount, "Multi-step macros use the spare keys F13 to F24.")
             .Add("Device", Theme.Lbl("ROCCAT Kone AIMO 16K (1E7D:2E2C)", Theme.Body, Theme.Secondary))
             .Add("Made by", Theme.Lbl("Miguel Valencia", Theme.Body, Theme.Secondary))
-            .Add("Version", Theme.Lbl("3.1", Theme.Body, Theme.Secondary));
+            .Add("Version", Theme.Lbl(Program.Version.ToString(3), Theme.Body, Theme.Secondary));
         return Column(start, storage, about);
     }
 
@@ -491,6 +491,7 @@ class MainForm : Form
         {
             onMouse = KoneAimo.Use(MouseState.Read); state = onMouse.Clone();
             if (AppConfig.LastSaved == null) AppConfig.LastSaved = onMouse;
+            AppConfig.KeepOriginal(onMouse);
             cur = onMouse.Active;
             deviceStatus.Text = "Connected"; deviceStatus.ForeColor = Theme.Accent;
             ShowState();
@@ -514,7 +515,7 @@ class MainForm : Form
             if (!Enumerable.Range(0, 5).Any(p.StageEnabled)) { Alert($"Profile {i + 1}: switch on at least one DPI stage."); return; }
             if (!p.StageEnabled(p.ActiveStage)) { Alert($"Profile {i + 1}: the stage in use is switched off."); return; }
             if (!Enumerable.Range(0, 12).Any(s => p.Action(s) == 1) &&
-                MessageBox.Show(this, $"Profile {i + 1} has no button set to Left click. Save anyway?", "Kone AIMO", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+                MessageBox.Show(this, $"Profile {i + 1} has no button set to Left click. Save anyway?", Program.Title, MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
         }
         try
         {
@@ -542,13 +543,13 @@ class MainForm : Form
 
     void RestoreBackup()
     {
-        using (var d = new OpenFileDialog { Filter = "Kone AIMO backup (*.json)|*.json", InitialDirectory = Path.GetDirectoryName(Application.ExecutablePath) })
+        using (var d = new OpenFileDialog { Filter = "Kone AIMO backup (*.json)|*.json", InitialDirectory = AppConfig.Dir })
         {
             if (d.ShowDialog(this) != DialogResult.OK) return;
             try
             {
                 var loaded = MouseState.FromJson(File.ReadAllText(d.FileName));
-                if (MessageBox.Show(this, "Write all 5 profiles from this backup to the mouse?", "Kone AIMO", MessageBoxButtons.YesNo) != DialogResult.Yes) return;
+                if (MessageBox.Show(this, "Write all 5 profiles from this backup to the mouse?", Program.Title, MessageBoxButtons.YesNo) != DialogResult.Yes) return;
                 state = loaded; Save();
             }
             catch (Exception ex) { Alert(ex.Message); }
@@ -558,13 +559,13 @@ class MainForm : Form
     // ------------------------------------------------------------------ tray + startup
     void SetupTray()
     {
-        Tray.Icon = Icon ?? SystemIcons.Application; Tray.Text = "Kone AIMO";
+        Tray.Icon = Icon ?? SystemIcons.Application; Tray.Text = Program.Title;
         Tray.Visible = trayStart || AppConfig.StartWithWindows;
         var menu = Menus.Create();
         menu.Opening += (s, e) =>
         {
             menu.Items.Clear();
-            Menus.Item(menu.Items, "Open Kone AIMO", "open").Font = Theme.Strong;
+            Menus.Item(menu.Items, "Open", "open").Font = Theme.Strong;
             Menus.Line(menu.Items);
             int active = -1; try { active = KoneAimo.Use(m => m.ActiveProfile); } catch { }
             Menus.Header(menu.Items, "Profile in use");
@@ -575,7 +576,7 @@ class MainForm : Form
             {
                 if (tag is int k) SwitchProfile(k);
                 else if ((string)tag == "open") OpenWindow();
-                else { quitting = true; Tray.Visible = false; Close(); Application.Exit(); }
+                else Quit();
             });
             e.Cancel = false;
         };
@@ -590,10 +591,12 @@ class MainForm : Form
         {
             KoneAimo.Use(m => { m.ActiveProfile = k; return 0; });
             if (onMouse != null) { onMouse.Active = k; if (state != null) state.Active = k; ShowState(); }
-            Tray.ShowBalloonTip(1500, "Kone AIMO", $"Now using profile {k + 1}.", ToolTipIcon.None);
+            Tray.ShowBalloonTip(1500, Program.Title, $"Now using profile {k + 1}.", ToolTipIcon.None);
         }
-        catch (Exception ex) { Tray.ShowBalloonTip(3000, "Kone AIMO", ex.Message, ToolTipIcon.Warning); }
+        catch (Exception ex) { Tray.ShowBalloonTip(3000, Program.Title, ex.Message, ToolTipIcon.Warning); }
     }
+
+    public void Quit() { quitting = true; Tray.Visible = false; Close(); Application.Exit(); }
 
     public void OpenWindow()
     {
@@ -623,7 +626,7 @@ class MainForm : Form
         if (!quitting && Tray.Visible && e.CloseReason == CloseReason.UserClosing)
         {
             e.Cancel = true; Hide(); UpdateLive();
-            if (!toldAboutTray) { Tray.ShowBalloonTip(2500, "Kone AIMO", "Still running in the tray, so your macros keep working.", ToolTipIcon.None); toldAboutTray = true; }
+            if (!toldAboutTray) { Tray.ShowBalloonTip(2500, Program.Title, "Still running in the tray, so your macros keep working.", ToolTipIcon.None); toldAboutTray = true; }
             return;
         }
         Tray.Visible = false; player.Dispose(); liveTimer.Stop();
@@ -649,17 +652,17 @@ class MainForm : Form
             {
                 KoneAimo.Use(m => MouseState.Apply(m, saved.WithLiveFrom(now), now));
                 msg = $"put back {lost} profile(s) the mouse had lost.";
-                BeginInvoke((Action)(() => Tray.ShowBalloonTip(5000, "Kone AIMO", "Your mouse had lost some settings. They have been put back.", ToolTipIcon.Info)));
+                BeginInvoke((Action)(() => Tray.ShowBalloonTip(5000, Program.Title, "Your mouse had lost some settings. They have been put back.", ToolTipIcon.Info)));
             }
             else
             {
                 msg = $"{lost} profile(s) differ from what you last saved (restoring is off).";
-                BeginInvoke((Action)(() => Tray.ShowBalloonTip(5000, "Kone AIMO", "Your mouse's settings differ from what you last saved.", ToolTipIcon.Warning)));
+                BeginInvoke((Action)(() => Tray.ShowBalloonTip(5000, Program.Title, "Your mouse's settings differ from what you last saved.", ToolTipIcon.Warning)));
             }
         }
         catch (Exception ex) { msg = "couldn't check: " + ex.Message; }
         AppConfig.LastCheck = $"{DateTime.Now:MMM d, HH:mm}: {msg}";
-        BeginInvoke((Action)(() => { var t = "Kone AIMO: " + msg; Tray.Text = t.Length > 63 ? t.Substring(0, 63) : t; ShowState(); }));
+        BeginInvoke((Action)(() => { var t = Program.Title + ": " + msg; Tray.Text = t.Length > 63 ? t.Substring(0, 63) : t; ShowState(); }));
     }
 
     // ------------------------------------------------------------------ helpers
@@ -700,7 +703,7 @@ class MainForm : Form
 
     static MouseState Fixed(MouseState s) { var c = s.Clone(); foreach (var p in c.P) p.FixChecksum(); return c; }
     void Status(string msg, Color c) { status.Text = msg; status.ForeColor = c; }
-    void Alert(string msg) { Status(msg, Theme.Red); MessageBox.Show(this, msg, "Kone AIMO", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+    void Alert(string msg) { Status(msg, Theme.Red); MessageBox.Show(this, msg, Program.Title, MessageBoxButtons.OK, MessageBoxIcon.Warning); }
     static string Hex(byte[] b) => string.Join(" ", b.Select(x => x.ToString("X2")));
 
     /// Mouse icon at the top of the sidebar, drawn like the logo tile on the portfolio.

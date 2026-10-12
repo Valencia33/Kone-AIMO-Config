@@ -7,9 +7,9 @@ using Microsoft.Win32;
 /// App preferences, the "start with Windows" entry, and the last settings saved to the mouse (%APPDATA%\KoneAimoConfig).
 static class AppConfig
 {
-    static readonly string Dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "KoneAimoConfig");
+    public static readonly string Dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "KoneAimoConfig");
     static string F(string name) { Directory.CreateDirectory(Dir); return Path.Combine(Dir, name); }
-    const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run", RunName = "Kone AIMO";
+    public const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run", RunName = "Kone AIMO";
 
     public static bool StartWithWindows
     {
@@ -63,6 +63,10 @@ static class AppConfig
         list.Remove(hex); list.Insert(0, hex);
         File.WriteAllLines(F("recent_colors.txt"), System.Linq.Enumerable.Take(list, 7));
     }
+
+    /// What the mouse held the first time this app saw it, kept once and never overwritten.
+    public static string OriginalBackup => F("original_settings.json");
+    public static void KeepOriginal(MouseState s) { if (!File.Exists(OriginalBackup)) File.WriteAllText(OriginalBackup, s.ToJson()); }
 
     public static string LastCheck
     {

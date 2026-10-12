@@ -8,6 +8,9 @@ using System.Windows.Forms;
 
 static class Program
 {
+    public const string Title = "Unofficial Kone AIMO Config", MutexName = @"Local\KoneAimoConfig", QuitEvent = @"Local\KoneAimoConfig-Quit";
+    public static readonly Version Version = typeof(Program).Assembly.GetName().Version;
+
     [STAThread]
     static int Main(string[] args)
     {
@@ -21,14 +24,19 @@ static class Program
         if (mode == "--macro-test" && args.Length == 2) return MacroTest(args[1]);
         if (mode == "--light-test" && args.Length == 2) return Run(args[1], LightTest);
         if (mode == "--startup" && args.Length == 2) { AppConfig.StartWithWindows = args[1] == "on"; return 0; }
+        if (mode == "--uninstall") return Setup.Uninstall(args.Contains("--quiet"));
+        if (mode == "--install" && args.Contains("--quiet")) { Setup.Install(false, false); return 0; }
+        if ((mode == "" || mode == "--install") && Setup.ShouldOffer() && Setup.Offer() != DialogResult.Ignore) return 0;
 
-        // one copy at a time: starting it again just brings the running one forward
-        using (var mutex = new Mutex(true, @"Local\KoneAimoConfig", out bool first))
+        // one copy at a time: starting it again just brings the running one forward; the installer asks it to quit
+        using (var mutex = new Mutex(true, MutexName, out bool first))
         using (var open = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\KoneAimoConfig-Open"))
+        using (var quit = new EventWaitHandle(false, EventResetMode.AutoReset, QuitEvent))
         {
             if (!first) { open.Set(); return 0; }
             var form = new MainForm(trayStart: mode == "--tray");
             new Thread(() => { while (open.WaitOne()) try { form.BeginInvoke((Action)form.OpenWindow); } catch { } }) { IsBackground = true }.Start();
+            new Thread(() => { if (quit.WaitOne()) try { form.BeginInvoke((Action)form.Quit); } catch { } }) { IsBackground = true }.Start();
             Application.Run(form);
         }
         return 0;
@@ -106,7 +114,7 @@ static class Program
         log.AppendLine($"{Macros.Blender.Length} Blender macros, {Macros.Blender.Count(m => m.InMouse)} stored in the mouse, {Macros.Blender.Count(m => !m.InMouse)} typed by the app");
 
         var got = new System.Collections.Generic.List<string>();
-        var f = new Form { TopMost = true, StartPosition = FormStartPosition.CenterScreen, Size = new Size(300, 120), Text = "Kone AIMO macro test", KeyPreview = true };
+        var f = new Form { TopMost = true, StartPosition = FormStartPosition.CenterScreen, Size = new Size(300, 120), Text = "Macro test", KeyPreview = true };
         f.KeyDown += (s, e) => { got.Add(KeyNames.Label(e.Shift ? 2 : 0, e.KeyCode)); e.Handled = e.SuppressKeyPress = true; };
         using (var player = new MacroPlayer())
         {
@@ -164,6 +172,7 @@ static class Program
             }
         }
         ColorPicker.Snapshot(Path.Combine(dir, "picker.png"));
+        Setup.Snapshot(Path.Combine(dir, "setup.png"));
         f.Tray.Visible = false;
         Environment.Exit(0);
     }
